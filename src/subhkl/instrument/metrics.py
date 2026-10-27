@@ -495,7 +495,10 @@ def compute_metrics(
                 peak_grp.create_dataset("h", data=h.astype(np.int32))
                 peak_grp.create_dataset("k", data=k.astype(np.int32))
                 peak_grp.create_dataset("l", data=l.astype(np.int32))
-                peak_grp.create_dataset("run", data=run_index.astype(np.int32))
+                # run_index is the composite frame+panel slot for Predictor
+                # "banks" output; record the true frame and panel instead.
+                peak_grp.create_dataset("run", data=frame_index.astype(np.int32))
+                peak_grp.create_dataset("panel", data=panel_index.astype(np.int32))
                 peak_grp.create_dataset("lambda", data=lam.astype(np.float32))
                 peak_grp.create_dataset(
                     "d_err",

@@ -144,6 +144,28 @@ def test_synthetic_indexing(tmp_path):
         with redirect_stdout(f):
             metrics(indexer_h5, instrument="MANDI")
 
+        # metrics/per_peak must record the true frame and panel, not the
+        # slot index used to look up per-slot goniometer arrays.
+        from subhkl.instrument.metrics import compute_metrics
+
+        frame_idx_mock = run_idx_mock + 100
+        panel_idx_mock = np.full_like(run_idx_mock, 7)
+        mock_extract.return_value = (
+            xyz_mock,
+            run_idx_mock,
+            panel_idx_mock,
+            frame_idx_mock,
+        )
+        result = compute_metrics(indexer_h5, instrument="MANDI", per_peak=True)
+        assert "error_message" not in result
+
+    with h5py.File(indexer_h5, "r") as fh:
+        per_peak_run = fh["metrics/per_peak/run"][()]
+        per_peak_panel = fh["metrics/per_peak/panel"][()]
+    assert len(per_peak_run) == result["num_peaks"] > 0
+    assert set(np.unique(per_peak_run)) <= set(np.unique(frame_idx_mock))
+    assert np.all(per_peak_panel == 7)
+
     output = f.getvalue()
     print(output)
 
