@@ -95,9 +95,13 @@ reproduces subhkl's physics, ``s1 = s0 + S · U · B · h``.
   export writes a small self-describing container (``<stem>_images.h5``) and
   attaches an ``ImageSet`` per frame, so the ``.expt`` opens in
   ``dials.image_viewer`` and friends. A bare image stack therefore exports one
-  experiment per goniometer setting. If the pixel data or the ImageSet API is
-  unavailable, the export falls back to geometry-only (load with
-  ``check_format=False``).
+  experiment per goniometer setting. A peaks file exported against its image
+  stack gets one experiment per stack frame and one panel per stack bank, so
+  frames and banks where no peak landed are still present (with no
+  reflections); their goniometer settings come from the stack. If the pixel
+  data or the ImageSet API is unavailable, or the peaks refer to frames or
+  banks the stack does not have, the export falls back to geometry-only (load
+  with ``check_format=False``).
 
 Opening the ImageSet requires the container reader to be registered with dxtbx.
 subhkl declares it through the ``dxtbx.format`` entry point

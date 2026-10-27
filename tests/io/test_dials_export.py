@@ -624,3 +624,283 @@ def test_roundtrip_detector_has_flat_projection(tmp_path):
     for panel in detector:
         r, _t = panel.get_projection_2d()
         assert tuple(r) == (-1, 0, 0, -1)  # per-panel 180-degree flip
+
+
+# ---------------------------------------------------------------------------
+# Peaks exported against their image stack (requires DIALS)
+# ---------------------------------------------------------------------------
+
+
+def _write_peaks_on(path, frames, banks):
+    """Finder-style peaks, one per (frame, bank) pair given, CG4D geometry."""
+    with h5py.File(path, "w") as f:
+        f.attrs["instrument"] = "CG4D"
+        f["instrument/wavelength"] = [2.0, 10.0]
+        n = len(frames)
+        f["peaks/intensity"] = np.full(n, 10.0)
+        f["peaks/sigma"] = np.full(n, 1.0)
+        f["peaks/pixel_r"] = np.full(n, 1.0)
+        f["peaks/pixel_c"] = np.full(n, 1.0)
+        f["bank"] = np.asarray(banks)
+        f["peaks/run_index"] = np.asarray(frames)
+
+
+def test_roundtrip_sparse_peaks_keep_the_imageset(tmp_path):
+    """Peaks on only some frames and banks still export every stack frame and
+    bank, with images; a frame without peaks takes the stack's setting."""
+    pytest.importorskip("dxtbx")
+    from dxtbx.model.experiment_list import ExperimentListFactory
+    from dials.array_family import flex
+
+    stack = tmp_path / "merged.h5"
+    _write_merged_stack(str(stack))  # frames 0 (0 deg) and 1 (10 deg), banks 11, 12
+    peaks = tmp_path / "found.h5"
+    _write_peaks_on(str(peaks), frames=[0], banks=[12])
+
+    expt_path = str(tmp_path / "found.expt")
+    refl_path = str(tmp_path / "found.refl")
+    dx.hdf5_to_dials(
+        str(peaks), expt_path, refl_path, instrument="CG4D", image_source=str(stack)
+    )
+
+    experiments = ExperimentListFactory.from_json_file(expt_path, check_format=True)
+    assert len(experiments) == 2
+    for expt in experiments:
+        assert expt.imageset is not None
+        assert len(expt.detector) == 2
+        assert len(expt.imageset.get_raw_data(0)) == 2
+
+    refl = flex.reflection_table.from_file(refl_path)
+    assert list(refl["id"]) == [0]
+    assert list(refl["panel"]) == [1]  # bank 12 is the second stack bank
+
+    # The peak-free frame's setting matches a bare export of the same stack.
+    bare_expt = str(tmp_path / "bare.expt")
+    dx.hdf5_to_dials(
+        str(stack), bare_expt, str(tmp_path / "bare.refl"), instrument="CG4D"
+    )
+    bare = ExperimentListFactory.from_json_file(bare_expt, check_format=False)
+    assert np.allclose(
+        experiments[1].goniometer.get_setting_rotation(),
+        bare[1].goniometer.get_setting_rotation(),
+    )
+
+
+def test_roundtrip_peaks_outside_the_stack_get_geometry_only(tmp_path, capsys):
+    """A stack missing a frame the peaks refer to is not their stack."""
+    pytest.importorskip("dxtbx")
+    from dxtbx.model.experiment_list import ExperimentListFactory
+
+    stack = tmp_path / "merged.h5"
+    _write_merged_stack(str(stack))
+    peaks = tmp_path / "found.h5"
+    _write_peaks_on(str(peaks), frames=[0, 5], banks=[11, 11])
+
+    expt_path = str(tmp_path / "found.expt")
+    dx.hdf5_to_dials(
+        str(peaks),
+        expt_path,
+        str(tmp_path / "found.refl"),
+        instrument="CG4D",
+        image_source=str(stack),
+    )
+
+    experiments = ExperimentListFactory.from_json_file(expt_path, check_format=False)
+    assert [e.imageset for e in experiments] == [None, None]
+    assert "wrote geometry only" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# --dials on the visualization and masking commands (requires DIALS)
+# ---------------------------------------------------------------------------
+
+_CLI_INSTRUMENT = "MANDI"
+_CLI_BANKS = [1, 2]
+_CLI_SHAPE = (256, 256)  # MANDI's panel size, so a mask maps pixel for pixel
+_CLI_FRAMES = 6  # static-mask wants at least 5 distinct frames per bank
+
+
+def _write_cli_stack(path):
+    """A merged MANDI stack: a spot that moves with the frame over Poisson
+    background, and a dead strip that stays put for static-mask to find."""
+    rng = np.random.default_rng(1)
+    yy, xx = np.mgrid[: _CLI_SHAPE[0], : _CLI_SHAPE[1]]
+    images, banks, angles, offsets = [], [], [], []
+    for frame in range(_CLI_FRAMES):
+        offsets.append(len(images))
+        for bank in _CLI_BANKS:
+            image = rng.poisson(20.0, size=_CLI_SHAPE).astype(np.float32)
+            r, c = 40 + 30 * frame, 60 + 25 * frame
+            image += 2000 * np.exp(-((yy - r) ** 2 + (xx - c) ** 2) / 8.0)
+            image[:, :12] = 0.0
+            images.append(image)
+            banks.append(bank)
+            angles.append([10.0 * frame])
+    with h5py.File(path, "w") as f:
+        f.attrs["instrument"] = _CLI_INSTRUMENT
+        f["images"] = np.stack(images)
+        f["bank_ids"] = np.asarray(banks, dtype=np.int32)
+        f["goniometer/angles"] = np.asarray(angles)
+        f["goniometer/axes"] = np.array([[0.0, 1.0, 0.0, 1.0]])
+        f["instrument/wavelength"] = [2.0, 4.0]
+        f["file_offsets"] = np.asarray(offsets, dtype=np.int64)
+        f["files"] = np.array([f"run{i}.h5".encode() for i in range(_CLI_FRAMES)])
+
+
+def _write_cli_peaks(path, frames, integrator):
+    """Finder or integrator peaks on bank 1 of the given frames only."""
+    rows = [len(_CLI_BANKS) * frame for frame in frames]  # bank 1's image rows
+    n = len(rows)
+    with h5py.File(path, "w") as f:
+        f.attrs["instrument"] = _CLI_INSTRUMENT
+        f["instrument/wavelength"] = [2.0, 4.0]
+        f["peaks/pixel_r"] = np.array([40.0 + 30 * fr for fr in frames])
+        f["peaks/pixel_c"] = np.array([60.0 + 25 * fr for fr in frames])
+        f["peaks/image_index"] = np.asarray(rows)
+        f["peaks/run_index"] = np.asarray(frames)
+        f["peaks/intensity"] = np.full(n, 500.0)
+        f["bank"] = np.full(n, _CLI_BANKS[0])
+        if integrator:
+            f["peaks/sigma"] = np.full(n, 20.0)
+            f["peaks/var_u"] = np.full(n, 9.0)
+            f["peaks/var_v"] = np.full(n, 4.0)
+            f["peaks/cov_uv"] = np.full(n, 1.0)
+        else:
+            from subhkl.viz import replay
+
+            f["peaks/radius"] = np.full(n, 0.01)
+            f["peaks/sigma"] = np.full(n, 3.0)
+            f["peaks/sigma"].attrs["quantity"] = replay.WIDTH_QUANTITY
+
+
+def _run_cli(*args):
+    from typer.testing import CliRunner
+
+    from subhkl.io.parser import app
+
+    result = CliRunner().invoke(app, list(args))
+    assert result.exit_code == 0, result.output
+    return result
+
+
+def _load_with_images(expt_path, n_experiments):
+    """Load an export with format checking; every experiment carries images
+    whose panels match the detector's."""
+    from dxtbx.model.experiment_list import ExperimentListFactory
+
+    experiments = ExperimentListFactory.from_json_file(expt_path, check_format=True)
+    assert len(experiments) == n_experiments
+    for expt in experiments:
+        assert expt.imageset is not None
+        raw = expt.imageset.get_raw_data(0)
+        assert len(raw) == len(expt.detector) == len(_CLI_BANKS)
+        for panel, data in zip(expt.detector, raw):
+            fast, slow = panel.get_image_size()
+            assert data.all() == (slow, fast)
+    return experiments
+
+
+def test_cli_sum_images_dials(tmp_path, monkeypatch):
+    pytest.importorskip("dxtbx")
+    from dials.array_family import flex
+
+    monkeypatch.chdir(tmp_path)
+    _write_cli_stack("images.h5")
+    _run_cli("sum-images", "summed.h5", "images.h5", "--dials")
+
+    _load_with_images("summed.expt", 1)  # one summed frame per bank
+    assert len(flex.reflection_table.from_file("summed.refl")) == 0
+
+
+def test_cli_static_mask_dials_is_a_usable_dials_mask(tmp_path, monkeypatch):
+    """The exported mask reads back exactly, and with DIALS's own polarity
+    (True = valid, as subhkl's 1 = valid) it applies through dials.apply_mask."""
+    pytest.importorskip("dxtbx")
+    import pickle
+
+    from dials.array_family import flex
+    from dials.command_line import apply_mask
+    from dxtbx.model.experiment_list import ExperimentListFactory
+
+    monkeypatch.chdir(tmp_path)
+    _write_cli_stack("images.h5")
+    _run_cli("static-mask", "mask.h5", "images.h5", "--dials")
+
+    experiments = _load_with_images("mask.expt", 1)
+    with h5py.File("mask.h5", "r") as f:
+        stored = f["images"][()]
+    raw = experiments[0].imageset.get_raw_data(0)
+    for panel_data, expected in zip(raw, stored):
+        assert np.array_equal(panel_data.as_numpy_array(), expected)
+    assert set(np.unique(stored)) == {0, 1}
+    assert (stored == 0).any()  # the dead strip was found
+
+    dials_mask = tuple(flex.bool(d.as_numpy_array().astype(bool)) for d in raw)
+    with open("subhkl.mask", "wb") as fh:
+        pickle.dump(dials_mask, fh)
+    apply_mask.run(
+        args=["mask.expt", "input.mask=subhkl.mask", "output.experiments=masked.expt"]
+    )
+    masked = ExperimentListFactory.from_json_file("masked.expt", check_format=True)
+    applied = masked[0].imageset.get_mask(0)
+    for got, wanted in zip(applied, dials_mask):
+        # get_mask may also exclude untrusted pixels, never fewer than ours.
+        assert not np.any(~wanted.as_numpy_array() & got.as_numpy_array())
+
+
+def test_cli_mask_visualize_dials_exports_the_mask(tmp_path, monkeypatch):
+    pytest.importorskip("dxtbx")
+
+    monkeypatch.chdir(tmp_path)
+    _write_cli_stack("images.h5")
+    _run_cli("static-mask", "mask.h5", "images.h5")
+    _run_cli(
+        "mask-visualize",
+        "images.h5",
+        "mask.h5",
+        "--dpi",
+        "40",
+        "--max-workers",
+        "1",
+        "--dials",
+        "--dials-prefix",
+        "drawn",
+    )
+
+    experiments = _load_with_images("drawn.expt", 1)
+    with h5py.File("mask.h5", "r") as f:
+        stored = f["images"][()]
+    raw = experiments[0].imageset.get_raw_data(0)
+    assert np.array_equal(raw[0].as_numpy_array(), stored[0])
+
+
+@pytest.mark.parametrize(
+    "command,integrator",
+    [("finder-visualize", False), ("integrator-visualize", True)],
+)
+def test_cli_visualize_dials_exports_the_drawn_peaks(
+    tmp_path, monkeypatch, command, integrator
+):
+    """Peaks on two frames of six, one bank of two, still export the whole
+    stack with images; each reflection lands on its own frame and panel."""
+    pytest.importorskip("dxtbx")
+    from dials.array_family import flex
+
+    monkeypatch.chdir(tmp_path)
+    _write_cli_stack("images.h5")
+    _write_cli_peaks("peaks.h5", frames=[1, 4], integrator=integrator)
+    _run_cli(
+        command,
+        "images.h5",
+        "peaks.h5",
+        "--dpi",
+        "40",
+        "--max-workers",
+        "1",
+        "--dials",
+    )
+
+    _load_with_images("peaks.expt", _CLI_FRAMES)
+    refl = flex.reflection_table.from_file("peaks.refl")
+    assert sorted(refl["id"]) == [1, 4]
+    assert set(refl["panel"]) == {0}

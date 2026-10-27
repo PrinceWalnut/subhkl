@@ -667,12 +667,42 @@ def hdf5_to_dials(
             else:
                 bank_ids = []
 
+        # Peaks rarely land on every frame and bank, but the ImageSet needs one
+        # experiment per stack frame and one panel per stack bank.  When the
+        # stack covers everything the peaks refer to, take its frames and banks
+        # so the images attach; frames without peaks become experiments with no
+        # reflections.  A stack missing some of them is not the one these peaks
+        # came from, so it gets geometry only.
+        peak_frame_ids = frame_ids
+        attach_images = False
+        if layout is not None:
+            attach_images = set(frame_ids) <= set(layout["frame_ids"]) and set(
+                bank_ids
+            ) <= set(layout["panel_bank_ids"])
+            if attach_images:
+                frame_ids = list(layout["frame_ids"])
+                bank_ids = list(layout["panel_bank_ids"])
+            else:
+                print(
+                    "Note: the peaks refer to frames or banks missing from the "
+                    f"image stack {stack_path}; wrote geometry only."
+                )
+
         detector, bank_to_panel = _build_detector(
             model, instrument, bank_ids, calibration
         )
 
         if peaks:
-            rotations, axes = _frame_rotations(f, peaks, frame_ids)
+            rotations, axes = _frame_rotations(f, peaks, peak_frame_ids)
+            # Frames without peaks take the stack's angles, as a bare stack
+            # export does.
+            for fr in frame_ids:
+                if fr not in rotations:
+                    rotations[fr] = (
+                        stack_rotations.get(fr, np.eye(3))
+                        if stack_rotations is not None
+                        else np.eye(3)
+                    )
         elif stack_rotations is not None:
             rotations = {fr: stack_rotations.get(fr, np.eye(3)) for fr in frame_ids}
             axes = stack_axes
@@ -715,12 +745,9 @@ def hdf5_to_dials(
                 [frame_s_lab.get(int(r), np.zeros(3)) for r in peaks["run_index"]]
             )
 
-        # Attach an ImageSet when the frames/panels line up with the stack layout.
-        if (
-            layout is not None
-            and frame_ids == list(layout["frame_ids"])
-            and bank_ids == list(layout["panel_bank_ids"])
-        ):
+        # Experiments and panels follow the stack layout's order, which is the
+        # order _attach_imageset hands out its frames and panels in.
+        if attach_images:
             container_path = os.path.splitext(expt_path)[0] + "_images.h5"
             _attach_imageset(
                 experiments, stack_path, layout, container_path, instrument
