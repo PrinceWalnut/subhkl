@@ -867,10 +867,15 @@ def metrics(
         typer.Option(
             "--per-peak",
             help="Write the metrics/per_peak table (h, k, l, run (true frame "
-            "index), panel, lambda, d_err, ang_err) into FILE1, for "
-            "scripts/error_analysis.py.",
+            "index), panel, lambda, d_err, ang_err) to a separate HDF5 file "
+            "for scripts/error_analysis.py (default: metrics_per_peak.h5, "
+            "override with --per-peak-path). FILE1 is never modified.",
         ),
     ] = False,
+    per_peak_path: Annotated[
+        str | None,
+        typer.Option("--per-peak-path", help="Custom path for --per-peak output."),
+    ] = None,
     ki_vec: Annotated[
         str | None,
         typer.Option(
@@ -922,6 +927,11 @@ def metrics(
     plot_output = (
         plot_path if plot_path is not None else ("metrics.png" if plot else None)
     )
+    per_peak_output = (
+        per_peak_path
+        if per_peak_path is not None
+        else ("metrics_per_peak.h5" if per_peak else None)
+    )
 
     run_metrics(
         file1=file1,
@@ -929,7 +939,7 @@ def metrics(
         instrument=instrument,
         d_min=d_min,
         per_run=per_run,
-        per_peak=per_peak,
+        per_peak_output=per_peak_output,
         ki_vec=ki_vec_parsed,
         csv_output=csv_output,
         plot_output=plot_output,

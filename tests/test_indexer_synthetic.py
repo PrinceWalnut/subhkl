@@ -1,6 +1,7 @@
 import os
 import h5py
 import numpy as np
+import pytest
 from scipy.spatial.transform import Rotation
 from unittest.mock import patch, MagicMock
 
@@ -156,10 +157,21 @@ def test_synthetic_indexing(tmp_path):
             panel_idx_mock,
             frame_idx_mock,
         )
-        result = compute_metrics(indexer_h5, instrument="MANDI", per_peak=True)
+        per_peak_h5 = os.path.join(tmp_path, "per_peak.h5")
+        with open(indexer_h5, "rb") as fh:
+            indexed_before = fh.read()
+        result = compute_metrics(
+            indexer_h5, instrument="MANDI", per_peak_output=per_peak_h5
+        )
         assert "error_message" not in result
 
-    with h5py.File(indexer_h5, "r") as fh:
+        # The table goes to its own file; the indexed file is only read.
+        with open(indexer_h5, "rb") as fh:
+            assert fh.read() == indexed_before
+        with pytest.raises(ValueError, match="separate file"):
+            compute_metrics(indexer_h5, instrument="MANDI", per_peak_output=indexer_h5)
+
+    with h5py.File(per_peak_h5, "r") as fh:
         per_peak_run = fh["metrics/per_peak/run"][()]
         per_peak_panel = fh["metrics/per_peak/panel"][()]
     assert len(per_peak_run) == result["num_peaks"] > 0
