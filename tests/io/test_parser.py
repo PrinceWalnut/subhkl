@@ -16,7 +16,11 @@ DIALS_COMMANDS = [
     "mtz-exporter",
     "reduce",
     "merge-images",
-    "zone-axis-search",
+    "finder-visualize",
+    "integrator-visualize",
+    "mask-visualize",
+    "static-mask",
+    "sum-images",
 ]
 
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")

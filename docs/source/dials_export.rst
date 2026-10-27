@@ -138,38 +138,68 @@ be re-run after changing the ``dxtbx.format`` entry in ``pyproject.toml``).
 Closest DIALS CLI parallel per program
 ---------------------------------------
 
-+---------------------+---------------------------------------------------------------+-------------------------------------------------------------+
-| subhkl command      | What the ``--dials`` output contains                          | Closest DIALS CLI program(s)                                |
-+=====================+===============================================================+=============================================================+
-| ``reduce``          | One experiment per goniometer setting, each with an ImageSet  | ``dials.import`` (build experiments from images)            |
-|                     | (beam, detector, goniometer); empty reflection table.         |                                                             |
-+---------------------+---------------------------------------------------------------+-------------------------------------------------------------+
-| ``merge_images``    | One experiment per frame of the merged stack, each with an    | ``dials.import`` / ``dials.combine_experiments``            |
-|                     | ImageSet; unit cell metadata; empty reflection table.         |                                                             |
-+---------------------+---------------------------------------------------------------+-------------------------------------------------------------+
-| ``finder``          | Observed peaks: ``xyzobs.px.value``, ``intensity.sum``,       | ``dials.find_spots`` (strong.refl)                          |
-|                     | ``panel``, per-frame experiments.                             |                                                             |
-+---------------------+---------------------------------------------------------------+-------------------------------------------------------------+
-| ``zone_axis_search``| Experiments with the oriented crystal (``U``/``B``);          | ``dials.index`` orientation search / ``dials.search_beam``  |
-|                     | empty reflection table.                                       | for the initial orientation.                                |
-+---------------------+---------------------------------------------------------------+-------------------------------------------------------------+
-| ``indexer``         | Indexed reflections: ``miller_index``, ``wavelength``,        | ``dials.index`` (indexed.expt + indexed.refl);              |
-|                     | ``xyzobs.px``, ``intensity`` + crystal model per frame.       | ``dials.refine`` for the geometry refinement it also does.  |
-+---------------------+---------------------------------------------------------------+-------------------------------------------------------------+
-| ``peak_predictor``  | Predicted reflections: ``xyzcal.px``, ``miller_index``,       | ``dials.predict``                                           |
-|                     | ``wavelength``, ``predicted`` flag.                           |                                                             |
-+---------------------+---------------------------------------------------------------+-------------------------------------------------------------+
-| ``integrator``      | Integrated reflections: ``intensity.sum``, ``miller_index``,  | ``dials.integrate`` (integrated.refl)                       |
-|                     | ``wavelength``, ``s1``.                                       |                                                             |
-+---------------------+---------------------------------------------------------------+-------------------------------------------------------------+
-| ``rbf_integrator``  | Integrated reflections (RBF profile fitting).                 | ``dials.integrate`` (profile-fitting path)                  |
-+---------------------+---------------------------------------------------------------+-------------------------------------------------------------+
-| ``mtz_exporter``    | The indexed/integrated reflections behind the MTZ, as         | ``dials.export format=mtz`` (the inverse: DIALS refl → MTZ) |
-|                     | ``.expt``/``.refl``.                                          |                                                             |
-+---------------------+---------------------------------------------------------------+-------------------------------------------------------------+
-| ``metrics``         | The reflections of the evaluated file (default stem           | ``dials.rl_png`` / ``dials.report`` (indexing quality);     |
-|                     | ``metrics``); residuals remain in ``--csv``.                  | residual analysis in ``dials.refine`` logs.                 |
-+---------------------+---------------------------------------------------------------+-------------------------------------------------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 45 35
+
+   * - subhkl command
+     - What the ``--dials`` output contains
+     - Closest DIALS CLI program(s)
+   * - ``reduce``
+     - One experiment per goniometer setting, each with an ImageSet (beam,
+       detector, goniometer); empty reflection table.
+     - ``dials.import`` (build experiments from images)
+   * - ``merge_images``
+     - One experiment per frame of the merged stack, each with an ImageSet; unit
+       cell metadata; empty reflection table.
+     - ``dials.import`` / ``dials.combine_experiments``
+   * - ``finder``
+     - Observed peaks: ``xyzobs.px.value``, ``intensity.sum``, ``panel``,
+       per-frame experiments.
+     - ``dials.find_spots`` (strong.refl)
+   * - ``indexer``
+     - Indexed reflections: ``miller_index``, ``wavelength``, ``xyzobs.px``,
+       ``intensity`` + crystal model per frame.
+     - ``dials.index`` (indexed.expt + indexed.refl); ``dials.refine`` for the
+       geometry refinement it also does.
+   * - ``peak_predictor``
+     - Predicted reflections: ``xyzcal.px``, ``miller_index``, ``wavelength``,
+       ``predicted`` flag.
+     - ``dials.predict``
+   * - ``integrator``
+     - Integrated reflections from RBF profile fitting: ``intensity.sum``,
+       ``miller_index``, ``wavelength``, ``s1``. ``rbf-integrator`` is a
+       deprecated alias for this command.
+     - ``dials.integrate`` (integrated.refl, profile-fitting path)
+   * - ``mtz_exporter``
+     - The indexed/integrated reflections behind the MTZ, as ``.expt``/``.refl``.
+     - ``dials.export format=mtz`` (the inverse: DIALS refl → MTZ)
+   * - ``metrics``
+     - The reflections of the evaluated file (default stem ``metrics``);
+       residuals remain in ``--csv``.
+     - ``dials.rl_png`` / ``dials.report`` (indexing quality); residual analysis
+       in ``dials.refine`` logs.
+   * - ``finder_visualize``
+     - The plots are PNGs, so the export carries the peaks being drawn: the
+       finder output, backed by the image stack, named after the peaks file.
+       Same content as ``finder --dials``.
+     - ``dials.image_viewer`` with a strong.refl overlay
+   * - ``integrator_visualize``
+     - As ``finder_visualize``, for the integrator output being drawn. Same
+       content as ``integrator --dials``.
+     - ``dials.image_viewer`` with an integrated.refl overlay
+   * - ``static_mask``
+     - The mask, a one-frame-per-bank uint8 stack (1 = valid), as a single
+       experiment whose ImageSet has one panel per bank; empty reflection table.
+     - ``dials.generate_mask`` (static detector masks)
+   * - ``mask_visualize``
+     - The mask being drawn, exported as for ``static_mask``.
+     - ``dials.image_viewer`` with a mask overlay
+   * - ``sum_images``
+     - The summed one-frame-per-bank stack as a single experiment with an
+       ImageSet; empty reflection table. Its goniometer angles are placeholders,
+       so the exported scan geometry is not physical.
+     - ``dials.merge_cbf`` (sums images)
 
 Comparing outputs against DIALS / Laue-DIALS
 --------------------------------------------
@@ -203,10 +233,6 @@ beam with the true per-reflection wavelength in the reflection table's
      - Strong-spot tables: counts per panel/frame, ``xyzobs.px`` centroid
        overlap, ``intensity.sum`` distributions. Overlay both on the images with
        ``dials.image_viewer scan.expt strong.refl``.
-   * - ``zone_axis_search``
-     - initial ``laue.index`` (monochromatic orientation estimate)
-     - The orientation matrix: ``dials.compare_orientation_matrices
-       subhkl.expt laue.expt`` reports the misorientation angle.
    * - ``indexer``
      - ``laue.index`` → ``laue.optimize_indexing`` → ``laue.refine``
      - Crystal: ``dials.compare_orientation_matrices`` for ``U``, cell in
@@ -219,7 +245,7 @@ beam with the true per-reflection wavelength in the reflection table's
      - ``laue.predict``
      - Predicted tables: ``xyzcal.px``, ``miller_index``, ``wavelength``, count,
        resolution/wavelength coverage. Overlay predictions on the images.
-   * - ``integrator`` / ``rbf_integrator``
+   * - ``integrator``
      - ``laue.integrate``
      - Integrated ``intensity.sum``/``intensity.prf`` and sigmas, I/σ
        distributions, intensity correlation matched by ``hkl`` + frame.
@@ -227,6 +253,17 @@ beam with the true per-reflection wavelength in the reflection table's
      - ``dials.export format=mtz`` (then ``careless`` for scaling/merging)
      - MTZ contents via ``gemmi``/``reciprocalspaceship``; the ``--dials``
        ``.expt``/``.refl`` behind the MTZ for a like-for-like reflection compare.
+   * - ``static_mask``
+     - ``dials.generate_mask``
+     - Masked regions per panel: open both ``.expt`` files in
+       ``dials.image_viewer`` and compare the excluded areas (beam stop, panel
+       edges).
+
+``finder_visualize``, ``integrator_visualize`` and ``mask_visualize`` export the
+same data as the step whose output they draw, so compare those exports exactly as
+for ``finder``, ``integrator`` and ``static_mask``. ``sum_images`` has no
+Laue-DIALS counterpart; its stack only exists to be run through the finder, whose
+peaks are passed back to ``static-mask --pooled-peaks``.
 
 The reason the ``--dials`` flag matters is that these tools then work on both
 sides without translation:

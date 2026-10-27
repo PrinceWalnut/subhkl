@@ -573,7 +573,7 @@ def hdf5_to_dials(
     ----------
     h5_path : str
         Path to a subhkl HDF5 output (finder, indexer, predictor, integrator,
-        reduce/merge image stack, or zone-axis seed).
+        or an image stack: reduce/merge, sum-images or a static mask).
     expt_path, refl_path : str
         Destination paths for the ExperimentList and reflection_table.
     instrument : str, optional
