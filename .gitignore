@@ -177,3 +177,18 @@ ADVERSARY.md
 ruff.toml
 sum_complexity.py
 tools/
+
+# direnv
+.envrc
+
+# Editor swap and backup files
+*.swp
+*.swo
+*~
+.*.sw?
+
+#versioningit
+src/subhkl/_version.py
+
+# claude
+.claude
